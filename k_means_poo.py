@@ -8,6 +8,8 @@ from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 import plotly.express as px
 import plotly.graph_objects as go
+import pickle
+from flask import Flask, request, jsonify
 
 class MusicRecommendation:
     def __init__(self, data_path='dataset_pivi_spotify_data.csv'):
@@ -45,24 +47,19 @@ class MusicRecommendation:
         return normalized_data
 
     def standardize_and_handle_outliers(self, data):
-        # Remover valores None antes de padronizar e tratar outliers
         data = [features for features in data if features is not None]
 
         if not data:
             print("Nenhuma característica válida disponível para normalização.")
             return None
 
-        # Convertendo para um DataFrame antes de padronizar
         df = pd.DataFrame(data)
-
-        # Tratar NaNs antes da padronização
         df = df.dropna()
 
         if df.empty:
             print("Todos os dados são NaN após o tratamento. Verifique suas características.")
             return None
 
-        # Padronizar os dados
         scaler = StandardScaler()
         standardized_data = scaler.fit_transform(df)
 
@@ -71,13 +68,12 @@ class MusicRecommendation:
     def find_optimal_num_clusters(self, data):
         inertias = []
         silhouettes = []
-        max_clusters = min(10, len(data))  # Define um limite superior para o número de clusters
+        max_clusters = min(10, len(data))
 
         for num_clusters in range(2, max_clusters + 1):
             kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10, max_iter=300, init='k-means++')
             cluster_labels = kmeans.fit_predict(data)
             
-            # Verificar se há mais de um cluster identificado
             unique_labels = np.unique(cluster_labels)
             if len(unique_labels) > 1:
                 inertia = kmeans.inertia_
@@ -92,22 +88,18 @@ class MusicRecommendation:
 
     def plot_elbow_method(self, ks, inertias, silhouettes):
         fig = go.Figure()
-
-        # Convertendo range para lista
         ks = list(ks)
 
-        # Plot da Inércia
         fig.add_trace(go.Scatter(x=ks, y=inertias, mode='lines+markers', name='Inércia'))
         fig.update_layout(title='Método do Cotovelo para Inércia', xaxis_title='Número de Clusters', yaxis_title='Inércia')
 
-        # Plot da Silhueta
         fig.add_trace(go.Scatter(x=ks, y=silhouettes, mode='lines+markers', name='Silhueta'))
         fig.update_layout(title='Método do Cotovelo para Silhueta', xaxis_title='Número de Clusters', yaxis_title='Silhueta')
 
         fig.show()
 
     def visualize_cluster_characteristics(self, data, labels, num_components):
-        df = pd.DataFrame(data, columns=self.feature_names[:num_components])  # Usando nomes reais das features
+        df = pd.DataFrame(data, columns=self.feature_names[:num_components])
         df['Cluster'] = labels
 
         cluster_means = df.groupby('Cluster').mean()
@@ -127,30 +119,38 @@ class MusicRecommendation:
         fig.update_layout(xaxis_title='Característica', yaxis_title='Importância')
         fig.show()
 
-    def recommend_songs(self, query_track_id='7r4GcILxwSpjADa4KFbob3'):
+    def save_kmeans_model(self, kmeans_model, filename='kmeans_model.pkl'):
+        with open(filename, 'wb') as file:
+            pickle.dump(kmeans_model, file)
+
+    def load_kmeans_model(self, filename='kmeans_model.pkl'):
+        with open(filename, 'rb') as file:
+            kmeans_model = pickle.load(file)
+        return kmeans_model
+
+    def recommend_songs(self, query_features=None):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
-        query_features = self.fetch_audio_features(query_track_id)
+        
+        query_features_list = []
+        for feature_name in self.feature_names:
+            query_features_list.append(query_features.get(feature_name, 0))
+        query_features_list = np.array(query_features_list).reshape(1, -1)
 
-        # Remover valores None antes de padronizar e tratar outliers
         playlist_features = [features for features in playlist_features if features is not None]
-        query_features = [query_features] if query_features is not None else []
+        query_features_list = [query_features_list] if query_features_list is not None else []
 
-        # Padronizar e tratar outliers
-        standardized_data = self.standardize_and_handle_outliers(playlist_features + query_features)
+        standardized_data = self.standardize_and_handle_outliers(playlist_features + query_features_list)
 
         if standardized_data is None:
             print("Não é possível prosseguir com características de áudio ausentes ou não numéricas.")
             return None, None
 
-        # Encontrar o número ótimo de clusters usando o método do cotovelo
-        num_components = 2  # Ajuste conforme necessário
+        num_components = 2
         self.find_optimal_num_clusters(standardized_data)
 
-        # Redução de Dimensionalidade usando PCA
         pca = PCA(n_components=num_components)
         reduced_data = pca.fit_transform(standardized_data)
 
-        # Calcular a matriz de similaridade usando cosseno
         similarity_matrix = cosine_similarity(reduced_data)
 
         best_kmeans = None
@@ -162,7 +162,6 @@ class MusicRecommendation:
                 kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=20, max_iter=500, init='random')
                 cluster_labels = kmeans.fit_predict(reduced_data)
 
-                # Verificar se há mais de um cluster identificado
                 unique_labels = np.unique(cluster_labels)
                 if len(unique_labels) > 1:
                     silhouette = silhouette_score(reduced_data, cluster_labels)
@@ -179,33 +178,46 @@ class MusicRecommendation:
                 print(f'Número de clusters: {num_clusters}, Não há amostras suficientes para formar {num_clusters} clusters.')
 
         if best_kmeans is not None:
+            self.save_kmeans_model(best_kmeans)
+
+            loaded_kmeans = self.load_kmeans_model()
+
             self.visualize_cluster_characteristics(reduced_data, best_cluster_labels, num_components)
 
             inertia = best_kmeans.inertia_
-            print(f'Inércia do Modelo: {inertia}')
-
-            query_cluster = best_kmeans.predict([reduced_data[-1]])[0]
+            query_cluster = loaded_kmeans.predict([reduced_data[-1]])[0]
             cluster_indices = np.where(best_cluster_labels == query_cluster)[0]
 
             if len(cluster_indices) == 0:
                 print("Nenhuma música semelhante encontrada.")
                 return None, inertia
 
-            recommended_songs = [self.playlist_track_ids[i] for i in cluster_indices if i < 90]
-
+            recommended_songs = [self.playlist_track_ids[i] for i in cluster_indices if i < len(self.playlist_track_ids)]
             return recommended_songs, inertia
         else:
             print("Não foi possível identificar clusters com mais de um rótulo.")
             return None, None
 
-# Uso da classe MusicRecommendation
+app = Flask(__name__)
 music_rec = MusicRecommendation()
-recommended_songs, inertia = music_rec.recommend_songs()
 
-if recommended_songs is not None:
-    for i in range(len(recommended_songs)):
-        print(f'Músicas Recomendadas: {recommended_songs[i]}')
-else:
-    print("Nenhuma música recomendada.")
+@app.route('/recommend-songs', methods=['POST'])
+def recommend():
+    try:
+        # Obtenha os dados JSON da solicitação POST
+        data = request.get_json()
+        print(data)
+        # Chame a função de recomendação com os dados fornecidos
+        recommended_songs = music_rec.recommend_songs(data), 
+        # inertia = 'music_rec.recommend_songs(data)'
 
-print(f'Inércia do Modelo: {inertia}')
+        if recommended_songs is not None:
+            return jsonify({"recommended_songs": recommended_songs}), 200
+        else:
+            return jsonify({"error": "Nenhuma música recomendada."}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
