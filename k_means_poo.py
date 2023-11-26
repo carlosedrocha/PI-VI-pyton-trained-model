@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
@@ -117,8 +117,7 @@ class MusicRecommendation:
         plt.tight_layout()
         plt.show()
 
-  
-    def recommend_songs(self, query_track_id='7r4GcILxwSpjADa4KFbob3'):
+    def recommend_songs(self, query_track_id='2Vl7x4BkNhhJkEmQQMcV0V'):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
         query_features = self.fetch_audio_features(query_track_id)
 
@@ -150,7 +149,7 @@ class MusicRecommendation:
 
         for num_clusters in range(2, 11):
             if len(reduced_data) >= num_clusters:
-                kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=20, max_iter=500, init='random')
+                kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=20, max_iter=500, init='k-means++')
                 cluster_labels = kmeans.fit_predict(reduced_data)
 
                 # Verificar se há mais de um cluster identificado
