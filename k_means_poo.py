@@ -13,7 +13,7 @@ class MusicRecommendation:
     def __init__(self, data_path='dataset_pivi_spotify_data.csv'):
         self.df = pd.read_csv(data_path)
         self.playlist_track_ids = [item for item in self.df['id']]
-        self.feature_names = ['acousticness', 'danceability', 'energy', 'instrumentalness', 'liveness', 'valence']
+        self.feature_names = ['acousticness', 'danceability', 'energy', 'instrumentalness', 'liveness', 'valence', 'speechiness', 'loudness']
 
     def fetch_audio_features(self, track_id):
         row = self.df[self.df['id'] == track_id]
@@ -106,13 +106,13 @@ class MusicRecommendation:
 
         fig.show()
 
-    def visualize_cluster_characteristics(self, data, labels):
-        df = pd.DataFrame(data, columns=['Feature 1', 'Feature 2'])
+    def visualize_cluster_characteristics(self, data, labels, num_components):
+        df = pd.DataFrame(data, columns=self.feature_names[:num_components])  # Usando nomes reais das features
         df['Cluster'] = labels
 
         cluster_means = df.groupby('Cluster').mean()
 
-        for feature in ['Feature 1', 'Feature 2']:
+        for feature in self.feature_names[:num_components]:
             fig = px.bar(cluster_means, x=cluster_means.index, y=feature, title=f'Média de {feature} por Cluster')
             fig.update_layout(xaxis_title='Cluster', yaxis_title=f'Média de {feature}')
             fig.show()
@@ -143,10 +143,10 @@ class MusicRecommendation:
             return None, None
 
         # Encontrar o número ótimo de clusters usando o método do cotovelo
+        num_components = 2  # Ajuste conforme necessário
         self.find_optimal_num_clusters(standardized_data)
 
         # Redução de Dimensionalidade usando PCA
-        num_components = 2  # Ajuste conforme necessário
         pca = PCA(n_components=num_components)
         reduced_data = pca.fit_transform(standardized_data)
 
@@ -179,7 +179,7 @@ class MusicRecommendation:
                 print(f'Número de clusters: {num_clusters}, Não há amostras suficientes para formar {num_clusters} clusters.')
 
         if best_kmeans is not None:
-            self.visualize_cluster_characteristics(reduced_data, best_cluster_labels)
+            self.visualize_cluster_characteristics(reduced_data, best_cluster_labels, num_components)
 
             inertia = best_kmeans.inertia_
             print(f'Inércia do Modelo: {inertia}')
