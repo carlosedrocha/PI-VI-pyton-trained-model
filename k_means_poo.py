@@ -13,38 +13,18 @@ class MusicRecommendation:
     def __init__(self, data_path='dataset_pivi_spotify_data.csv'):
         self.df = pd.read_csv(data_path)
         self.playlist_track_ids = [item for item in self.df['id']]
-        self.feature_names = ['acousticness', 'danceability', 'energy', 'instrumentalness', 'liveness', 'valence', 'speechiness', 'loudness']
+        self.feature_names = list(self.df.select_dtypes(include=['number']).columns)  # Selecionar todas as colunas numéricas
 
     def fetch_audio_features(self, track_id):
         row = self.df[self.df['id'] == track_id]
         
         if not row.empty:
-            features = row.iloc[:, 3:9].values.flatten()  # Excluir a coluna 'audio_features'
+            features = row[self.feature_names].values.flatten()
             return features
         else:
             return None
 
-    def normalize_data(self, data):
-        valid_data = [features for features in data if features is not None]
-        
-        if not valid_data:
-            print("Nenhuma característica válida disponível para normalização.")
-            return None
-        
-        min_length = min(len(features) for features in valid_data)
-        normalized_data = [features[:min_length] for features in valid_data]
-        
-        if not all(isinstance(value, (int, float)) for features in normalized_data for value in features):
-            print("Existem valores não numéricos nos dados. Verifique suas características:")
-            for i, features in enumerate(normalized_data):
-                print(f"Características da música {i + 1}: {features}")
-            return None
-
-        scaler = StandardScaler()
-        normalized_data = scaler.fit_transform(normalized_data)
-        return normalized_data
-
-    def standardize_and_handle_outliers(self, data):
+    def preprocess_data(self, data):
         # Remover valores None antes de padronizar e tratar outliers
         data = [features for features in data if features is not None]
 
@@ -52,8 +32,8 @@ class MusicRecommendation:
             print("Nenhuma característica válida disponível para normalização.")
             return None
 
-        # Convertendo para um DataFrame antes de padronizar
-        df = pd.DataFrame(data)
+        # Convertendo para um DataFrame antes de tratar outliers
+        df = pd.DataFrame(data, columns=self.feature_names)
 
         # Tratar NaNs antes da padronização
         df = df.dropna()
@@ -62,11 +42,23 @@ class MusicRecommendation:
             print("Todos os dados são NaN após o tratamento. Verifique suas características.")
             return None
 
+        # Tratar outliers
+        df = self.handle_outliers(df)
+
         # Padronizar os dados
         scaler = StandardScaler()
         standardized_data = scaler.fit_transform(df)
 
         return standardized_data
+
+    def handle_outliers(self, df):
+        # Implemente aqui a lógica para lidar com outliers, por exemplo, usando IQR ou Z-score.
+        # Exemplo com IQR:
+        Q1 = df.quantile(0.25)
+        Q3 = df.quantile(0.75)
+        IQR = Q3 - Q1
+        df_no_outliers = df[~((df < (Q1 - 1.5 * IQR)) | (df > (Q3 + 1.5 * IQR))).any(axis=1)]
+        return df_no_outliers
 
     def find_optimal_num_clusters(self, data):
         inertias = []
@@ -90,6 +82,96 @@ class MusicRecommendation:
 
         self.plot_elbow_method(range(2, max_clusters + 1), inertias, silhouettes)
 
+    def select_best_features(self, data, num_features=5):
+        # Utilizando RandomForestClassifier para encontrar a importância das features
+        classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+
+        # Obtendo rótulos (labels) equivalentes a self.feature_names
+        labels = np.arange(len(data))
+
+        # Adicionando esta verificação para garantir que os tamanhos correspondam
+        if len(labels) != len(data):
+            print("Erro: O número de rótulos não coincide com o número de amostras.")
+            return None, None
+
+        classifier.fit(data, labels)
+
+        # Obtendo a importância das características
+        feature_importances = classifier.feature_importances_
+
+        # Selecionando os índices das melhores características
+        selected_feature_indices = np.argsort(feature_importances)[::-1][:num_features]
+
+        # Selecionando as melhores features
+        selected_data = data[:, selected_feature_indices]
+        selected_feature_names = np.array(self.feature_names)[selected_feature_indices]
+
+        return selected_data, selected_feature_names
+
+    def plot_elbow_method(self, ks, inertias, silhouettes):
+        fig = go.Figure()
+
+        # Convertendo range para lista
+        ks = list(ks)
+
+        # Plot da Inércia
+        fig.add_trace(go.Scatter(x=ks, y=inertias, mode='lines+markers', name='Inércia'))
+        fig.update_layout(title='Método do Cotovelo para Inércia', xaxis_title='Número de Clusters', yaxis_title='Inércia')
+
+        # Plot da Silhueta
+        fig.add_trace(go.Scatter(x=ks, y=silhouettes, mode='lines+markers', name='Silhueta'))
+        fig.update_layout(title='Método do Cotovelo para Silhueta', xaxis_title='Número de Clusters', yaxis_title='Silhueta')
+
+        fig.show()
+
+    def find_optimal_num_clusters(self, data):
+        inertias = []
+        silhouettes = []
+        max_clusters = min(10, len(data))  # Define um limite superior para o número de clusters
+
+        for num_clusters in range(2, max_clusters + 1):
+            kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10, max_iter=300, init='k-means++')
+            cluster_labels = kmeans.fit_predict(data)
+            
+            # Verificar se há mais de um cluster identificado
+            unique_labels = np.unique(cluster_labels)
+            if len(unique_labels) > 1:
+                inertia = kmeans.inertia_
+                silhouette = silhouette_score(data, cluster_labels)
+                inertias.append(inertia)
+                silhouettes.append(silhouette)
+            else:
+                inertias.append(np.nan)
+                silhouettes.append(np.nan)
+
+        self.plot_elbow_method(range(2, max_clusters + 1), inertias, silhouettes)
+
+    def select_best_features(self, data, num_features=5):
+        # Utilizando RandomForestClassifier para encontrar a importância das features
+        classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+
+        # Obtendo rótulos (labels) equivalentes a self.feature_names
+        labels = np.arange(len(data))
+
+        # Adicionando esta verificação para garantir que os tamanhos correspondam
+        if len(labels) != len(data):
+            print("Erro: O número de rótulos não coincide com o número de amostras.")
+            return None, None
+
+        classifier.fit(data, labels)
+
+        # Obtendo a importância das características
+        feature_importances = classifier.feature_importances_
+
+        # Selecionando os índices das melhores características
+        selected_feature_indices = np.argsort(feature_importances)[::-1][:num_features]
+
+        # Selecionando as melhores features
+        selected_data = data[:, selected_feature_indices]
+        selected_feature_names = np.array(self.feature_names)[selected_feature_indices]
+
+        return selected_data, selected_feature_names
+
     def plot_elbow_method(self, ks, inertias, silhouettes):
         fig = go.Figure()
 
@@ -110,13 +192,19 @@ class MusicRecommendation:
         df = pd.DataFrame(data, columns=self.feature_names[:num_components])  # Usando nomes reais das features
         df['Cluster'] = labels
 
-        cluster_means = df.groupby('Cluster').mean()
+        fig = px.scatter_3d(df, x=df.columns[0], y=df.columns[1], z=df.columns[2], color='Cluster',
+                            title=f'Clusters com Detalhes das Características',
+                            labels={df.columns[0]: df.columns[0], df.columns[1]: df.columns[1], df.columns[2]: df.columns[2], 'Cluster': 'Cluster'})
 
-        for feature in self.feature_names[:num_components]:
-            fig = px.bar(cluster_means, x=cluster_means.index, y=feature, title=f'Média de {feature} por Cluster')
-            fig.update_layout(xaxis_title='Cluster', yaxis_title=f'Média de {feature}')
-            fig.show()
+        # Adicionar informações detalhadas sobre cada item no cluster
+        for index, row in df.iterrows():
+            item_info = f"Track ID: {self.playlist_track_ids[index]}<br>"
+            for feat in self.feature_names[:num_components]:
+                item_info += f"{feat}: {row[feat]:.4f}<br>"
+            fig.update_layout(scene=dict(annotations=[dict(x=row[df.columns[0]], y=row[df.columns[1]], z=row[df.columns[2]], text=item_info,
+                                                            showarrow=False, xshift=10)]))
 
+        fig.show()
     def feature_importance(self, data, labels):
         classifier = RandomForestClassifier(n_estimators=100, random_state=42)
         classifier.fit(data, labels)
@@ -136,19 +224,25 @@ class MusicRecommendation:
         query_features = [query_features] if query_features is not None else []
 
         # Padronizar e tratar outliers
-        standardized_data = self.standardize_and_handle_outliers(playlist_features + query_features)
+        standardized_data = self.preprocess_data(playlist_features + query_features)
 
         if standardized_data is None:
             print("Não é possível prosseguir com características de áudio ausentes ou não numéricas.")
             return None, None
 
+        # Selecionar as melhores características usando RandomForestClassifier
+        selected_data, selected_feature_names = self.select_best_features(standardized_data)
+
+        # Exibir as features escolhidas
+        print(f"Features Escolhidas: {', '.join(selected_feature_names)}")
+
         # Encontrar o número ótimo de clusters usando o método do cotovelo
         num_components = 2  # Ajuste conforme necessário
-        self.find_optimal_num_clusters(standardized_data)
+        self.find_optimal_num_clusters(selected_data)
 
-        # Redução de Dimensionalidade usando PCA
+        # Redução de Dimensionalidade usando PCA após a seleção de características
         pca = PCA(n_components=num_components)
-        reduced_data = pca.fit_transform(standardized_data)
+        reduced_data = pca.fit_transform(selected_data)
 
         # Calcular a matriz de similaridade usando cosseno
         similarity_matrix = cosine_similarity(reduced_data)
@@ -180,6 +274,7 @@ class MusicRecommendation:
 
         if best_kmeans is not None:
             self.visualize_cluster_characteristics(reduced_data, best_cluster_labels, num_components)
+            # self.plot_cluster_characteristics(reduced_data, best_cluster_labels, num_components)
 
             inertia = best_kmeans.inertia_
             print(f'Inércia do Modelo: {inertia}')
