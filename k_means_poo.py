@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -14,6 +15,7 @@ class MusicRecommendation:
         self.df = pd.read_csv(data_path)
         self.playlist_track_ids = [item for item in self.df['id']]
         self.feature_names = list(self.df.select_dtypes(include=['number']).columns)  # Selecionar todas as colunas numéricas
+        self.kmeans_model = None
 
     def fetch_audio_features(self, track_id):
         row = self.df[self.df['id'] == track_id]
@@ -293,8 +295,60 @@ class MusicRecommendation:
             print("Não foi possível identificar clusters com mais de um rótulo.")
             return None, None
 
+    def train_model(self):
+        playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
+
+        # Remover valores None antes de padronizar e tratar outliers
+        playlist_features = [features for features in playlist_features if features is not None]
+
+        # Padronizar e tratar outliers
+        standardized_data = self.preprocess_data(playlist_features)
+
+        if standardized_data is None:
+            print("Não é possível prosseguir com características de áudio ausentes ou não numéricas.")
+            return None
+
+        # Selecionar as melhores características usando RandomForestClassifier
+        selected_data, _ = self.select_best_features(standardized_data)
+
+        # Redução de Dimensionalidade usando PCA após a seleção de características
+        num_components = 2
+        pca = PCA(n_components=num_components)
+        reduced_data = pca.fit_transform(selected_data)
+
+        # Treinar o modelo de clusterização (KMeans)
+        self.kmeans_model = KMeans(n_clusters=3, random_state=42, n_init=20, max_iter=500, init='random')
+        self.cluster_labels = self.kmeans_model.fit_predict(reduced_data)
+
+    def save_model(self, filename='music_recommendation_model.pkl'):
+        if hasattr(self, 'kmeans_model'):
+            with open(filename, 'wb') as file:
+                pickle.dump(self.kmeans_model, file)
+            print(f"Modelo salvo em {filename}.")
+        else:
+            print("O modelo ainda não foi treinado. Execute o método 'train_model' antes de salvar.")
+
+    def load_model(self, filename='music_recommendation_model.pkl'):
+        try:
+            with open(filename, 'rb') as file:
+                self.kmeans_model = pickle.load(file)
+            print(f"Modelo carregado de {filename}.")
+        except FileNotFoundError:
+            print(f"Arquivo {filename} não encontrado. Treine um novo modelo ou forneça um caminho de arquivo válido.")
+
 # Uso da classe MusicRecommendation
 music_rec = MusicRecommendation()
+
+# Treinar o modelo
+music_rec.train_model()
+
+# Salvar o modelo em um arquivo pickle
+music_rec.save_model()
+
+# Carregar o modelo de um arquivo pickle
+music_rec.load_model()
+
+
 recommended_songs, inertia = music_rec.recommend_songs()
 
 if recommended_songs is not None:
