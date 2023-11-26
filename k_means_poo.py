@@ -5,12 +5,15 @@ from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+import plotly.express as px
+import plotly.graph_objects as go
 
 class MusicRecommendation:
     def __init__(self, data_path='dataset_pivi_spotify_data.csv'):
         self.df = pd.read_csv(data_path)
         self.playlist_track_ids = [item for item in self.df['id']]
+        self.feature_names = ['acousticness', 'danceability', 'energy', 'instrumentalness', 'liveness', 'valence']
 
     def fetch_audio_features(self, track_id):
         row = self.df[self.df['id'] == track_id]
@@ -63,16 +66,6 @@ class MusicRecommendation:
         scaler = StandardScaler()
         standardized_data = scaler.fit_transform(df)
 
-        # Tratar outliers usando a técnica IQR
-        Q1 = np.percentile(standardized_data, 25, axis=0)
-        Q3 = np.percentile(standardized_data, 75, axis=0)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-
-        # Substituir outliers pelos limites
-        standardized_data = np.clip(standardized_data, lower_bound, upper_bound)
-
         return standardized_data
 
     def find_optimal_num_clusters(self, data):
@@ -98,26 +91,42 @@ class MusicRecommendation:
         self.plot_elbow_method(range(2, max_clusters + 1), inertias, silhouettes)
 
     def plot_elbow_method(self, ks, inertias, silhouettes):
-        plt.figure(figsize=(10, 4))
+        fig = go.Figure()
+
+        # Convertendo range para lista
+        ks = list(ks)
 
         # Plot da Inércia
-        plt.subplot(1, 2, 1)
-        plt.plot(ks, inertias, marker='o')
-        plt.title('Método do Cotovelo para Inércia')
-        plt.xlabel('Número de Clusters')
-        plt.ylabel('Inércia')
+        fig.add_trace(go.Scatter(x=ks, y=inertias, mode='lines+markers', name='Inércia'))
+        fig.update_layout(title='Método do Cotovelo para Inércia', xaxis_title='Número de Clusters', yaxis_title='Inércia')
 
         # Plot da Silhueta
-        plt.subplot(1, 2, 2)
-        plt.plot(ks, silhouettes, marker='o')
-        plt.title('Método do Cotovelo para Silhueta')
-        plt.xlabel('Número de Clusters')
-        plt.ylabel('Silhueta')
+        fig.add_trace(go.Scatter(x=ks, y=silhouettes, mode='lines+markers', name='Silhueta'))
+        fig.update_layout(title='Método do Cotovelo para Silhueta', xaxis_title='Número de Clusters', yaxis_title='Silhueta')
 
-        plt.tight_layout()
-        plt.show()
+        fig.show()
 
-  
+    def visualize_cluster_characteristics(self, data, labels):
+        df = pd.DataFrame(data, columns=['Feature 1', 'Feature 2'])
+        df['Cluster'] = labels
+
+        cluster_means = df.groupby('Cluster').mean()
+
+        for feature in ['Feature 1', 'Feature 2']:
+            fig = px.bar(cluster_means, x=cluster_means.index, y=feature, title=f'Média de {feature} por Cluster')
+            fig.update_layout(xaxis_title='Cluster', yaxis_title=f'Média de {feature}')
+            fig.show()
+
+    def feature_importance(self, data, labels):
+        classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+        classifier.fit(data, labels)
+
+        feature_importances = classifier.feature_importances_
+
+        fig = px.bar(x=self.feature_names, y=feature_importances, title='Importância das Características')
+        fig.update_layout(xaxis_title='Característica', yaxis_title='Importância')
+        fig.show()
+
     def recommend_songs(self, query_track_id='7r4GcILxwSpjADa4KFbob3'):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
         query_features = self.fetch_audio_features(query_track_id)
@@ -170,7 +179,7 @@ class MusicRecommendation:
                 print(f'Número de clusters: {num_clusters}, Não há amostras suficientes para formar {num_clusters} clusters.')
 
         if best_kmeans is not None:
-            self.visualize_clusters(reduced_data, best_cluster_labels)
+            self.visualize_cluster_characteristics(reduced_data, best_cluster_labels)
 
             inertia = best_kmeans.inertia_
             print(f'Inércia do Modelo: {inertia}')
@@ -188,14 +197,6 @@ class MusicRecommendation:
         else:
             print("Não foi possível identificar clusters com mais de um rótulo.")
             return None, None
-
-    def visualize_clusters(self, data, labels):
-        plt.figure(figsize=(8, 6))
-        plt.scatter(data[:, 0], data[:, 1], c=labels, cmap='viridis', alpha=0.8)
-        plt.title('Visualização dos Clusters')
-        plt.xlabel('Feature 1')
-        plt.ylabel('Feature 2')
-        plt.show()
 
 # Uso da classe MusicRecommendation
 music_rec = MusicRecommendation()
