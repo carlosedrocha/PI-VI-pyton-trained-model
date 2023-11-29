@@ -16,6 +16,7 @@ class MusicRecommendation:
         self.playlist_track_ids = [item for item in self.df['id']]
         self.feature_names = list(self.df.select_dtypes(include=['number']).columns)  # Selecionar todas as colunas numéricas
         self.kmeans_model = None
+        
 
     def fetch_audio_features(self, track_id):
         row = self.df[self.df['id'] == track_id]
@@ -50,6 +51,9 @@ class MusicRecommendation:
         # Padronizar os dados
         scaler = StandardScaler()
         standardized_data = scaler.fit_transform(df)
+        with open('scaler.pkl', 'wb') as scaler_file:
+          pickle.dump(scaler, scaler_file)
+
 
         return standardized_data
 
@@ -217,7 +221,7 @@ class MusicRecommendation:
         fig.update_layout(xaxis_title='Característica', yaxis_title='Importância')
         fig.show()
 
-    def recommend_songs(self, query_track_id='7r4GcILxwSpjADa4KFbob3'):
+    def recommend_songs(self, query_track_id='7r4GcILxwSpjADa4KFbob3', model_save_path='modelo_kmeans.pkl', preprocessing_save_path='preprocessing_objects.pkl'):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
         query_features = self.fetch_audio_features(query_track_id)
 
@@ -281,6 +285,49 @@ class MusicRecommendation:
             inertia = best_kmeans.inertia_
             print(f'Inércia do Modelo: {inertia}')
 
+            scaler = StandardScaler()
+            # Salvar objetos relacionados ao tratamento de dados com pickle
+            preprocessing_objects = {
+                'scaler': scaler,
+                'pca': pca,
+                'selected_feature_names': selected_feature_names
+            }
+            with open(preprocessing_save_path, 'wb') as preprocessing_file:
+                pickle.dump(preprocessing_objects, preprocessing_file)
+
+            with open('pca.pkl', 'wb') as pca_file:
+                pickle.dump(pca, pca_file)
+
+            with open('selected_feature_names.pkl', 'wb') as selected_feature_names_file:
+                pickle.dump(selected_feature_names, selected_feature_names_file)
+
+
+
+            # Salvar o modelo com pickle
+            with open(model_save_path, 'wb') as model_file:
+                pickle.dump(best_kmeans, model_file)
+
+            # Salvar Centroides, Rótulos dos Clusters e Hiperparâmetros usando pickle
+            with open('centroides.pkl', 'wb') as centroides_file:
+                pickle.dump(best_kmeans.cluster_centers_, centroides_file)
+
+            with open('rotulos_clusters.pkl', 'wb') as rotulos_clusters_file:
+                pickle.dump(best_cluster_labels, rotulos_clusters_file)
+
+            with open('kmeans_model.pkl', 'wb') as model_file:
+                pickle.dump(best_kmeans, model_file)
+
+
+            hiperparametros = {
+                'num_clusters': best_kmeans.n_clusters,
+                'random_state': best_kmeans.random_state,
+                'n_init': best_kmeans.n_init,
+                'max_iter': best_kmeans.max_iter,
+                'init': best_kmeans.init
+            }
+            with open('hiperparametros.pkl', 'wb') as hiperparametros_file:
+                pickle.dump(hiperparametros, hiperparametros_file)
+
             query_cluster = best_kmeans.predict([reduced_data[-1]])[0]
             cluster_indices = np.where(best_cluster_labels == query_cluster)[0]
 
@@ -294,6 +341,7 @@ class MusicRecommendation:
         else:
             print("Não foi possível identificar clusters com mais de um rótulo.")
             return None, None
+
 
     def train_model(self):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
