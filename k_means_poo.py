@@ -128,18 +128,14 @@ class MusicRecommendation:
             kmeans_model = pickle.load(file)
         return kmeans_model
 
-    def recommend_songs(self, query_features=None):
+    def recommend_songs(self,query_track_id='0vtR1BWnjKvzs85eqcC5gn'):
         playlist_features = [self.fetch_audio_features(track_id) for track_id in self.playlist_track_ids]
-        
-        query_features_list = []
-        for feature_name in self.feature_names:
-            query_features_list.append(query_features.get(feature_name, 0))
-        query_features_list = np.array(query_features_list).reshape(1, -1)
+        query_features = self.fetch_audio_features(query_track_id)
 
         playlist_features = [features for features in playlist_features if features is not None]
-        query_features_list = [query_features_list] if query_features_list is not None else []
+        query_features = [query_features] if query_features is not None else []
 
-        standardized_data = self.standardize_and_handle_outliers(playlist_features + query_features_list)
+        standardized_data = self.standardize_and_handle_outliers(playlist_features + query_features)
 
         if standardized_data is None:
             print("Não é possível prosseguir com características de áudio ausentes ou não numéricas.")
@@ -185,6 +181,8 @@ class MusicRecommendation:
             self.visualize_cluster_characteristics(reduced_data, best_cluster_labels, num_components)
 
             inertia = best_kmeans.inertia_
+            print(f'Inércia do Modelo: {inertia}')
+
             query_cluster = loaded_kmeans.predict([reduced_data[-1]])[0]
             cluster_indices = np.where(best_cluster_labels == query_cluster)[0]
 
@@ -193,25 +191,24 @@ class MusicRecommendation:
                 return None, inertia
 
             recommended_songs = [self.playlist_track_ids[i] for i in cluster_indices if i < len(self.playlist_track_ids)]
-            return recommended_songs
+            return recommended_songs, inertia
         else:
             print("Não foi possível identificar clusters com mais de um rótulo.")
             return None, None
 
+
 app = Flask(__name__)
-music_rec = MusicRecommendation()
 
 @app.route('/recommend-songs', methods=['POST'])
 def recommend():
     try:
+        music_rec = MusicRecommendation()
         # Obtenha os dados JSON da solicitação POST
         data = request.get_json()
         # Chame a função de recomendação com os dados fornecidos
-        recommended_songs = music_rec.recommend_songs(data), 
-        # inertia = 'music_rec.recommend_songs(data)'
-
+        recommended_songs, inertia = music_rec.recommend_songs(data['query_track_id'])
         if recommended_songs is not None:
-            return jsonify({"recommended_songs": recommended_songs}), 200
+            return jsonify({"recommended_songs": recommended_songs, "inertia": inertia}), 200
         else:
             return jsonify({"error": "Nenhuma música recomendada."}), 404
 
